@@ -18,6 +18,8 @@ typedef struct {
   int *clusterAssignments;
   double *currCost;
   int M, N, K;
+  int theadId;
+  int numThreads;
 } WorkerArgs;
 
 /**
@@ -60,31 +62,48 @@ double dist(double *x, double *y, int nDim) {
   return sqrt(accum);
 }
 
+void workerThreadStart(WorkerArgs *const args) {
+  // Assign datapoints to closest centroids
+  int numRows = (args->M + args->numThreads - 1) / args->numThreads;
+  int startRow = numRows * args->theadId;
+  numRows = std::min(numRows, args->M - startRow);
+  for (int m = startRow; m < startRow + numRows; ++m) {
+    double minD = 1e30;
+    int assignment = -1;
+    for (int k = 0; k < args->K; k++) {
+      double d = dist(&args->data[m * args->N],
+                      &args->clusterCentroids[k * args->N], args->N);
+      if (d < minD) {
+        minD = d;
+        assignment = k;
+      }
+      args->clusterAssignments[m] = assignment;
+    }
+  }
+}
+
 /**
  * Assigns each data point to its "closest" cluster centroid.
  */
-void computeAssignments(WorkerArgs *const args) {
-  double *minDist = new double[args->M];
+void computeAssignments(WorkerArgs *const args, const int numThreads) {
+  constexpr int MAX_THREADS = 32;
+  std::thread workers[MAX_THREADS];
+  WorkerArgs workerArgs[MAX_THREADS];
 
-  // Initialize arrays
-  for (int m = 0; m < args->M; m++) {
-    minDist[m] = 1e30;
-    args->clusterAssignments[m] = -1;
+  for (int i = 0; i < numThreads; ++i) {
+    workerArgs[i] = *args;
+    workerArgs[i].theadId = i;
   }
 
-  // Assign datapoints to closest centroids
-  for (int k = args->start; k < args->end; k++) {
-    for (int m = 0; m < args->M; m++) {
-      double d = dist(&args->data[m * args->N],
-                      &args->clusterCentroids[k * args->N], args->N);
-      if (d < minDist[m]) {
-        minDist[m] = d;
-        args->clusterAssignments[m] = k;
-      }
-    }
+  for (int i = 1; i < numThreads; i++) {
+    workers[i] = std::thread(workerThreadStart, &workerArgs[i]);
   }
+  workerThreadStart(&workerArgs[0]);
 
-  delete[] minDist;
+  // join worker threads
+  for (int i = 1; i < numThreads; i++) {
+    workers[i].join();
+  }
 }
 
 /**
@@ -141,7 +160,7 @@ void computeCost(WorkerArgs *const args) {
   }
 
   // Update costs
-  for (int k = args->start; k < args->end; k++) {
+  for (int k = 0; k < args->K; k++) {
     args->currCost[k] = accum[k];
   }
 
@@ -200,12 +219,13 @@ void kMeansThread(double *data, double *clusterCentroids,
     for (int k = 0; k < K; k++) {
       prevCost[k] = currCost[k];
     }
-
+    constexpr int numThreads = 8;
     // Setup args struct
     args.start = 0;
-    args.end = K;
+    args.end = M;
+    args.numThreads = numThreads;
 
-    computeAssignments(&args);
+    computeAssignments(&args, numThreads);
     computeCentroids(&args);
     computeCost(&args);
 
