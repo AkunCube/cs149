@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cstring>
 #include <getopt.h>
 #include <stdio.h>
 
@@ -58,7 +59,7 @@ int main(int argc, char **argv) {
   const unsigned int width = 1600;
   const unsigned int height = 1200;
   const int maxIterations = 256;
-  int numThreads = 2;
+  int numThreads = 8;
 
   float x0 = -2;
   float x1 = 1;
@@ -72,7 +73,8 @@ int main(int argc, char **argv) {
                                          {"help", 0, 0, '?'},
                                          {0, 0, 0, 0}};
 
-  while ((opt = getopt_long(argc, argv, "t:v:?", long_options, NULL)) != EOF) {
+  while ((opt = getopt_long(argc, argv, "t:v:?", long_options, nullptr)) !=
+         EOF) {
 
     switch (opt) {
       case 't': {
