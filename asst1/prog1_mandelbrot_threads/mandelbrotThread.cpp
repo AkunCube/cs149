@@ -32,12 +32,14 @@ void workerThreadStart(WorkerArgs *const args) {
   // program that uses two threads, thread 0 could compute the top
   // half of the image and thread 1 could compute the bottom half.
   // printf("Hello world from thread %d\n", args->threadId);
-  int numRows = (args->height + args->numThreads - 1) / args->numThreads;
-  int startRow = numRows * args->threadId;
-  numRows = std::min(numRows, static_cast<int>(args->height - startRow));
-  mandelbrotSerial(args->x0, args->y0, args->x1, args->y1, args->width,
-                   args->height, startRow, numRows, args->maxIterations,
-                   args->output);
+
+  // Assigning contiguous row blocks to threads often results in severe load
+  // imbalance.
+  int startRow = args->threadId;
+  for (int row = startRow; row < args->height; row += args->numThreads) {
+    mandelbrotSerial(args->x0, args->y0, args->x1, args->y1, args->width,
+                     args->height, row, 1, args->maxIterations, args->output);
+  }
 }
 
 //
