@@ -3,6 +3,7 @@
 
 #include "itasksys.h"
 #include <atomic>
+#include <condition_variable>
 #include <mutex>
 #include <thread>
 
@@ -87,6 +88,23 @@ public:
   TaskID runAsyncWithDeps(IRunnable *runnable, int num_total_tasks,
                           const std::vector<TaskID> &deps);
   void sync();
+
+private:
+  int num_threads;
+  std::vector<std::thread> workers;
+  std::mutex mutex;
+  std::atomic<bool> shutdown;
+
+  std::condition_variable work_cv;
+  std::condition_variable done_cv; // Protected by mutex.
+
+  IRunnable *current_runnable; // Protected by mutex.
+  int cur_num_total_tasks;     // Protected by mutex.
+  int next_task;               // Protected by mutex.
+
+  std::atomic<int> num_completed;
+
+  void workerLoop();
 };
 
 #endif
