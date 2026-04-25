@@ -93,10 +93,11 @@ private:
   int num_threads;
   std::vector<std::thread> workers;
   std::mutex mutex;
-  std::atomic<bool> shutdown;
+  std::mutex done_mutex;
+  bool shutdown;
 
   std::condition_variable work_cv;
-  std::condition_variable done_cv; // Protected by mutex.
+  std::condition_variable done_cv; // Protected by done_mutex.
 
   IRunnable *current_runnable; // Protected by mutex.
   int cur_num_total_tasks;     // Protected by mutex.

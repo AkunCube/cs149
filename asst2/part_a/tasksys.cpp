@@ -248,8 +248,8 @@ TaskSystemParallelThreadPoolSleeping::~TaskSystemParallelThreadPoolSleeping() {
   {
     std::lock_guard<std::mutex> lock(mutex);
     shutdown = true;
-    work_cv.notify_all();
   }
+  work_cv.notify_all();
 
   for (auto &worker : workers) {
     worker.join();
@@ -301,7 +301,7 @@ void TaskSystemParallelThreadPoolSleeping::run(IRunnable *runnable,
   work_cv.notify_all();
 
   {
-    std::unique_lock<std::mutex> lock(mutex);
+    std::unique_lock<std::mutex> lock(done_mutex);
     // Wait for all workers to complete.
     done_cv.wait(lock, [&]() { return num_completed == num_total_tasks; });
     current_runnable = nullptr;
