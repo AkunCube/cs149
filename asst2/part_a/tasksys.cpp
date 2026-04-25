@@ -127,16 +127,50 @@ const char *TaskSystemParallelThreadPoolSpinning::name() {
 
 TaskSystemParallelThreadPoolSpinning::TaskSystemParallelThreadPoolSpinning(
     int num_threads)
-    : ITaskSystem(num_threads) {
+    : ITaskSystem(num_threads), num_threads(num_threads), shutdown(false),
+      current_runnable(nullptr), cur_num_total_tasks(0), next_task(0),
+      num_completed_workers(0) {
   //
   // TODO: CS149 student implementations may decide to perform setup
   // operations (such as thread pool construction) here.
   // Implementations are free to add new class member variables
   // (requiring changes to tasksys.h).
   //
+  workers.reserve(num_threads);
+  for (int i = 0; i < num_threads; ++i) {
+    workers.emplace_back(&TaskSystemParallelThreadPoolSpinning::workerLoop,
+                         this);
+  }
 }
 
-TaskSystemParallelThreadPoolSpinning::~TaskSystemParallelThreadPoolSpinning() {}
+void TaskSystemParallelThreadPoolSpinning::workerLoop() {
+  while (true) {
+    IRunnable *cur_r = nullptr;
+    int cur_total = 0;
+    int cur_task = 0;
+    {
+      std::lock_guard<std::mutex> g(mutex);
+      if (shutdown) {
+        break;
+      }
+      if (!current_runnable || next_task >= cur_num_total_tasks) {
+        continue;
+      }
+      cur_r = current_runnable;
+      cur_total = cur_num_total_tasks;
+      cur_task = next_task++;
+    }
+    cur_r->runTask(cur_task, cur_total);
+    ++num_completed_workers;
+  }
+}
+
+TaskSystemParallelThreadPoolSpinning::~TaskSystemParallelThreadPoolSpinning() {
+  shutdown = true;
+  for (auto &worker : workers) {
+    worker.join();
+  }
+}
 
 void TaskSystemParallelThreadPoolSpinning::run(IRunnable *runnable,
                                                int num_total_tasks) {
@@ -146,9 +180,21 @@ void TaskSystemParallelThreadPoolSpinning::run(IRunnable *runnable,
   // method in Part A.  The implementation provided below runs all
   // tasks sequentially on the calling thread.
   //
+  {
+    std::lock_guard<std::mutex> g(mutex);
+    current_runnable = runnable;
+    cur_num_total_tasks = num_total_tasks;
+    next_task = 0;
+    num_completed_workers = 0;
+  }
 
-  for (int i = 0; i < num_total_tasks; i++) {
-    runnable->runTask(i, num_total_tasks);
+  while (num_completed_workers < num_total_tasks) {
+    ;
+  }
+
+  {
+    std::lock_guard<std::mutex> g(mutex);
+    current_runnable = nullptr;
   }
 }
 
