@@ -190,6 +190,7 @@ void TaskSystemParallelThreadPoolSleeping::workerLoop() {
     Task *task = nullptr;
     int batch_id = 0;
     int total_tasks = 0;
+    TaskID task_id = -1;
     IRunnable *runnable = nullptr;
     auto it = executable_tasks.end();
     {
@@ -216,6 +217,8 @@ void TaskSystemParallelThreadPoolSleeping::workerLoop() {
 
       // Extract task parameters and atomically assign a batch ID.
       task = *it;
+      // Cache id locally; cleanup below erases task_map[id], destroying *task.
+      task_id = task->id;
       runnable = task->runnable;
       total_tasks = task->num_total_tasks;
       batch_id = task->next_task++;
@@ -233,17 +236,20 @@ void TaskSystemParallelThreadPoolSleeping::workerLoop() {
       std::lock_guard<std::mutex> lock(mutex);
 
       // Process child dependencies: topological sort activation.
-      for (const TaskID &child_id : forward_graph[task->id]) {
-        if (--num_deps[child_id] == 0) {
-          executable_tasks.push_back(task_map[child_id].get());
-          need_wake_worker = true;
+      auto fg_it = forward_graph.find(task_id);
+      if (fg_it != forward_graph.end()) {
+        for (const TaskID &child_id : fg_it->second) {
+          if (--num_deps[child_id] == 0) {
+            executable_tasks.push_back(task_map[child_id].get());
+            need_wake_worker = true;
+          }
         }
+        forward_graph.erase(fg_it);
       }
 
       // Clean up completed task resources.
       executable_tasks.erase(it);
-      task_map.erase(task->id);
-      forward_graph.erase(task->id);
+      task_map.erase(task_id);
 
       // Notify done if no executable tasks remain.
       if (executable_tasks.empty()) {
