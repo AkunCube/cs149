@@ -2,6 +2,14 @@
 #define _TASKSYS_H
 
 #include "itasksys.h"
+#include <atomic>
+#include <condition_variable>
+#include <list>
+#include <mutex>
+#include <thread>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
 
 /*
  * TaskSystemSerial: This class is the student's implementation of a
@@ -68,6 +76,35 @@ public:
   TaskID runAsyncWithDeps(IRunnable *runnable, int num_total_tasks,
                           const std::vector<TaskID> &deps);
   void sync();
+
+private:
+  struct Task {
+    IRunnable *runnable = nullptr;
+    TaskID id;
+    int num_total_tasks;
+    int next_task;
+    std::atomic<int> num_completed;
+
+    Task(IRunnable *runnable, TaskID id, int num_total_tasks)
+        : runnable(runnable), id(id), num_total_tasks(num_total_tasks),
+          next_task(0), num_completed(0) {}
+  };
+
+  int num_threads;
+  std::vector<std::thread> workers;
+  std::mutex mutex;
+  bool shutdown;
+  std::condition_variable work_cv;
+  std::condition_variable done_cv;
+
+  TaskID next_task_id;
+  std::unordered_map<TaskID, std::unordered_set<TaskID>> forward_graph;
+  std::unordered_map<TaskID, std::unique_ptr<Task>> task_map;
+  std::unordered_map<TaskID, int> num_deps;
+
+  std::list<Task *> executable_tasks;
+
+  void workerLoop();
 };
 
 #endif
