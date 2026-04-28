@@ -224,6 +224,31 @@ double cudaScanThrust(int *inarray, int *end, int *resultarray) {
   return overallDuration;
 }
 
+__global__ void create_mask_kernel(const int *input, int N, int *mask) {
+  int tid = blockIdx.x * blockDim.x + threadIdx.x;
+  if (tid >= N) {
+    return;
+  }
+
+  if (tid < N - 1 && input[tid] == input[tid + 1]) {
+    mask[tid] = 1;
+  } else {
+    mask[tid] = 0;
+  }
+}
+
+__global__ void scatter_indices_kernel(const int *mask, const int *scan, int N,
+                                       int *output) {
+  int tid = blockIdx.x * blockDim.x + threadIdx.x;
+  if (tid >= N) {
+    return;
+  }
+
+  if (mask[tid]) {
+    output[scan[tid]] = tid;
+  }
+}
+
 // find_repeats --
 //
 // Given an array of integers `device_input`, returns an array of all
@@ -244,7 +269,21 @@ int find_repeats(int *device_input, int length, int *device_output) {
   // must ensure that the results of find_repeats are correct given
   // the actual array length.
 
-  return 0;
+  int *mask_d;
+  int *scan_d;
+  cudaMalloc(&mask_d, length * sizeof(int));
+  cudaMalloc(&scan_d, length * sizeof(int));
+  const int num_blocks = (length + THREADS_PER_BLOCK - 1) / THREADS_PER_BLOCK;
+  create_mask_kernel<<<num_blocks, THREADS_PER_BLOCK>>>(device_input, length,
+                                                        mask_d);
+  exclusive_scan(mask_d, length, scan_d);
+  scatter_indices_kernel<<<num_blocks, THREADS_PER_BLOCK>>>(
+      mask_d, scan_d, length, device_output);
+  int result = 0;
+  cudaMemcpy(&result, scan_d + length - 1, sizeof(int), cudaMemcpyDeviceToHost);
+  cudaFree(mask_d);
+  cudaFree(scan_d);
+  return result;
 }
 
 //
