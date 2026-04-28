@@ -26,6 +26,79 @@ static inline int nextPow2(int n) {
   return n;
 }
 
+__global__ void add_kernel(int *result, int *partial_sum, int N) {
+  int segment = 2 * blockIdx.x * blockDim.x;
+  if (blockIdx.x > 0) {
+    result[segment + threadIdx.x] += partial_sum[blockIdx.x];
+    result[segment + threadIdx.x + THREADS_PER_BLOCK] +=
+        partial_sum[blockIdx.x];
+  }
+}
+
+__global__ void exclusive_scan_kernel(int *input, int *result, int *partial_sum,
+                                      int N) {
+  const int BLOCK_ELEMS = 2 * THREADS_PER_BLOCK;
+
+  const int segment = blockIdx.x * BLOCK_ELEMS;
+  const int tid = threadIdx.x;
+
+  __shared__ int buffer[BLOCK_ELEMS];
+
+  // Load into shared memory.
+  if (segment + tid < N) {
+    buffer[tid] = input[segment + tid];
+  } else {
+    buffer[tid] = 0;
+  }
+
+  if (segment + THREADS_PER_BLOCK + tid < N) {
+    buffer[THREADS_PER_BLOCK + tid] = input[segment + THREADS_PER_BLOCK + tid];
+  } else {
+    buffer[THREADS_PER_BLOCK + tid] = 0;
+  }
+  __syncthreads();
+
+  // Upsweep phase.
+  for (int stride = 1; stride <= THREADS_PER_BLOCK; stride *= 2) {
+    int idx = 2 * stride * (tid + 1) - 1;
+    if (idx < BLOCK_ELEMS) {
+      buffer[idx] += buffer[idx - stride];
+    }
+    __syncthreads();
+  }
+
+  int block_total = 0;
+  if (tid == 0) {
+    block_total = buffer[BLOCK_ELEMS - 1];
+    buffer[BLOCK_ELEMS - 1] = 0;
+  }
+  __syncthreads();
+
+  // Downsweep phase.
+  for (int stride = THREADS_PER_BLOCK; stride >= 1; stride /= 2) {
+    int idx = 2 * stride * (tid + 1) - 1;
+    if (idx < BLOCK_ELEMS) {
+      int temp = buffer[idx];
+      buffer[idx] += buffer[idx - stride];
+      buffer[idx - stride] = temp;
+    }
+    __syncthreads();
+  }
+
+  // Store the partial sum.
+  if (tid == 0) {
+    partial_sum[blockIdx.x] = block_total;
+  }
+
+  // Write back.
+  if (segment + tid < N) {
+    result[segment + tid] = buffer[tid];
+  }
+  if (segment + THREADS_PER_BLOCK + tid < N) {
+    result[segment + THREADS_PER_BLOCK + tid] = buffer[THREADS_PER_BLOCK + tid];
+  }
+}
+
 // exclusive_scan --
 //
 // Implementation of an exclusive scan on global memory array `input`,
@@ -51,6 +124,19 @@ void exclusive_scan(int *input, int N, int *result) {
   // on the CPU.  Your implementation will need to make multiple calls
   // to CUDA kernel functions (that you must write) to implement the
   // scan.
+  const int num_elements_per_block = 2 * THREADS_PER_BLOCK;
+  const int num_blocks =
+      (N + num_elements_per_block - 1) / num_elements_per_block;
+  int *partial_sum = nullptr;
+  cudaMalloc(&partial_sum, num_blocks * sizeof(int));
+  exclusive_scan_kernel<<<num_blocks, THREADS_PER_BLOCK>>>(input, result,
+                                                           partial_sum, N);
+  if (num_blocks > 1) {
+    exclusive_scan(partial_sum, num_blocks, partial_sum);
+    add_kernel<<<num_blocks, THREADS_PER_BLOCK>>>(result, partial_sum, N);
+  }
+
+  cudaFree(partial_sum);
 }
 
 //
