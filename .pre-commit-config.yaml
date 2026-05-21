@@ -14,3 +14,11 @@ repos:
       - id: clang-format
         name: Format code with clang-format
         files: \.(cpp|h|hpp|c|cc|cxx|m|mm|cu)$
+
+-   repo: https://github.com/psf/black
+    rev: 24.4.2
+    hooks:
+    - id: black
+      name: Format Python code with Black
+      files: \.py$
+      language_version: python3
